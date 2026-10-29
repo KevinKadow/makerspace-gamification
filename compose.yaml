@@ -1,0 +1,212 @@
+x-ledger-environment: &ledger-environment
+  # Explicit pass-through keeps tunnel/download credentials out of bot containers.
+  MLAB_URI: ${MLAB_URI:-}
+  LEDGER_URI: ${LEDGER_URI:-}
+  MLAB_DATABASE: ${MLAB_DATABASE:-}
+  LEDGER_DATABASE: ${LEDGER_DATABASE:-}
+  LEDGER_OPTIMIZED_READS: ${LEDGER_OPTIMIZED_READS:-false}
+  LEDGER_QUERY_METRICS: ${LEDGER_QUERY_METRICS:-false}
+  MONGO_URI: ${MONGO_URI:-}
+  MONGO_DATABASE: ${MONGO_DATABASE:-}
+  SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+  SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+  SLACK_TEAM_ID: ${SLACK_TEAM_ID:-}
+  SLACK_BOT_USER_ID: ${SLACK_BOT_USER_ID:-}
+  ANOMALY_ENABLED: ${ANOMALY_ENABLED:-false}
+  SLACK_CHANNEL_ANOMALY: ${SLACK_CHANNEL_ANOMALY:-ledger-audit}
+  SLACKIDS_INELIGIBLE: "${SLACKIDS_INELIGIBLE:-}"
+  LEDGER_CHANNELS: ${LEDGER_CHANNELS:-}
+  LEDGER_QUEST_REVIEW_CHANNEL_ID: ${LEDGER_QUEST_REVIEW_CHANNEL_ID:-}
+  LEDGER_QUEST_CONTEXT_LIMIT: ${LEDGER_QUEST_CONTEXT_LIMIT:-8192}
+  LEDGER_LLM_BASE_URL: ${LEDGER_LLM_BASE_URL:-http://ledger-ai:8000/v1}
+  LEDGER_LLM_MODEL: ${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}
+  LEDGER_LLM_API_KEY: ${LEDGER_LLM_API_KEY:?Set a shared vLLM API key in .env}
+  LEDGER_PROMPT_MATRIX_DOC_URL: ${LEDGER_PROMPT_MATRIX_DOC_URL:-}
+  LEDGER_PROMPT_MATRIX_GOOGLE_ACCESS_TOKEN: ${LEDGER_PROMPT_MATRIX_GOOGLE_ACCESS_TOKEN:-}
+  LEDGER_OBSERVATION: ${LEDGER_OBSERVATION:-true}
+  # Compatibility only: application guardrails always keep proposals audit-only.
+  LEDGER_OBSERVATION_AUDIT_ONLY: ${LEDGER_OBSERVATION_AUDIT_ONLY:-true}
+  LEDGER_DEDUCTIONS: ${LEDGER_DEDUCTIONS:-false}
+  LEDGER_NOVEL_ANNOUNCEMENTS: ${LEDGER_NOVEL_ANNOUNCEMENTS:-false}
+  LEDGER_WELCOMES: ${LEDGER_WELCOMES:-false}
+  LEDGER_WELCOME_PROBABILITY: ${LEDGER_WELCOME_PROBABILITY:-0.2}
+  LEDGER_AVATAR_RUNTIME_URL: ${LEDGER_AVATAR_RUNTIME_URL:-http://ledger-image:8090}
+  LEDGER_AVATAR_RUNTIME_KEY: ${LEDGER_AVATAR_RUNTIME_KEY:-}
+  LEDGER_AVATAR_MODEL_REVISION: ${LEDGER_AVATAR_MODEL_REVISION:-deployment-pinned}
+  LEDGER_AVATAR_BIO_FIELD_ID: ${LEDGER_AVATAR_BIO_FIELD_ID:-}
+  LEDGER_AVATAR_INTERESTS_FIELD_ID: ${LEDGER_AVATAR_INTERESTS_FIELD_ID:-}
+  LEDGER_AVATAR_PROMPT_TIMEOUT_SECONDS: ${LEDGER_AVATAR_PROMPT_TIMEOUT_SECONDS:-60}
+  LEDGER_AVATAR_CONTEXT_LIMIT: ${LEDGER_AVATAR_CONTEXT_LIMIT:-8192}
+  MQTT_HOST: ${MQTT_HOST:-localhost}
+  MQTT_PORT: ${MQTT_PORT:-1883}
+  MQTT_USER: ${MQTT_USER:-}
+  MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+  MQTT_TLS: ${MQTT_TLS:-false}
+  MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-makerspace-ledger}
+
+services:
+  ledger-avatars:
+    profiles: [avatars]
+    build: .
+    environment: *ledger-environment
+    command: ["ledger", "worker", "--queue", "avatars"]
+    volumes:
+      - avatar-spool:/var/lib/ledger-avatars
+    restart: unless-stopped
+
+  ledger-image:
+    profiles: [avatars]
+    build:
+      context: .
+      dockerfile: Dockerfile.image
+      args:
+        VLLM_OMNI_IMAGE: ${VLLM_OMNI_IMAGE:-vllm/vllm-omni:latest}
+    platform: linux/arm64
+    ipc: host
+    init: true
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      LEDGER_AVATAR_RUNTIME_KEY: ${LEDGER_AVATAR_RUNTIME_KEY:-}
+      LEDGER_AVATAR_RUNTIME_COMMAND: ${LEDGER_AVATAR_RUNTIME_COMMAND:-}
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+      - image-spool:/var/lib/ledger-image
+    expose: ["8090"]
+    restart: unless-stopped
+
+  ledger-web:
+    build: .
+    environment:
+      <<: *ledger-environment
+      SLACK_SOCKET_MODE: ${SLACK_SOCKET_MODE:-false}
+      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+    ports: ["127.0.0.1:${LEDGER_WEB_PORT:-3000}:3000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/health', timeout=2).close()"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+  ledger-accounting:
+    build: .
+    environment:
+      <<: *ledger-environment
+      MQTT_CLIENT_ID: ledger-accounting
+    command: ["ledger", "worker", "--queue", "inbox"]
+    restart: unless-stopped
+  ledger-delivery:
+    build: .
+    environment:
+      <<: *ledger-environment
+      MQTT_CLIENT_ID: ledger-delivery
+      # Drive credentials are available only to the worker that delivers images.
+      LEDGER_TICKET_GOOGLE_ACCESS_TOKEN: ${LEDGER_TICKET_GOOGLE_ACCESS_TOKEN:-}
+      LEDGER_TICKET_GOOGLE_FOLDER_ID: ${LEDGER_TICKET_GOOGLE_FOLDER_ID:-}
+    command: ["ledger", "worker", "--queue", "outbox"]
+    volumes:
+      - avatar-spool:/var/lib/ledger-avatars
+    # AI startup/outages must not block delivery via canned fallbacks.
+    restart: unless-stopped
+  ledger-channels:
+    build: .
+    environment: *ledger-environment
+    command: ["ledger", "worker", "--queue", "channels"]
+    restart: unless-stopped
+
+  ledger-results:
+    build: .
+    environment: *ledger-environment
+    command: ["ledger", "worker", "--queue", "results"]
+    restart: unless-stopped
+
+  ledger-interactive:
+    build: .
+    environment: *ledger-environment
+    command: ["ledger", "worker", "--queue", "interactive"]
+    restart: unless-stopped
+
+  ledger-engagement:
+    build: .
+    environment: *ledger-environment
+    command: ["ledger", "worker", "--queue", "engagement"]
+    restart: unless-stopped
+
+  ledger-ai:
+    image: ${VLLM_IMAGE:-ghcr.io/timothystewart6/vllm-gb10:latest}
+    platform: linux/arm64
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      VLLM_API_KEY: ${LEDGER_LLM_API_KEY:?Set a shared vLLM API key in .env}
+    volumes:
+      - huggingface-cache:/root/.cache/huggingface
+    # vllm-gb10 has no entrypoint: include the vllm serve executable explicitly.
+    command:
+      - vllm
+      - serve
+      - nvidia/Qwen3.8-27B-NVFP4
+      - --served-model-name
+      - ${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --tensor-parallel-size
+      - "1"
+      - --gpu-memory-utilization
+      - ${VLLM_GPU_MEMORY_UTILIZATION:-0.7}
+      - --max-model-len
+      - ${VLLM_MAX_MODEL_LEN:-16384}
+      - --max-num-seqs
+      - ${VLLM_MAX_NUM_SEQS:-4}
+      - --kv-cache-dtype
+      - fp8_e4m3
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+      - --generation-config
+      - vllm
+      - --default-chat-template-kwargs
+      - '{"enable_thinking": false}'
+    # No host port or tunnel route: only the Ledger services call the AI API.
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).close()"]
+      start_period: 20m
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set a remotely managed Cloudflare Tunnel token in .env}
+    depends_on:
+      ledger-web:
+        condition: service_healthy
+    # Configure the tunnel's published hostname origin as http://ledger-web:3000.
+    restart: unless-stopped
+
+volumes:
+  huggingface-cache:
+  avatar-spool:
+  image-spool:

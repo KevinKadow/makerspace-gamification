@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+__pycache__
+.pytest_cache
+.pytest*
+pytest-temp*
+.test-basetemp*
+build/anomaly/rails.git
+build/anomaly/rails.previous
+build/anomaly/snapshot.*
+tests

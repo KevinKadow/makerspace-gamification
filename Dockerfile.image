@@ -1,0 +1,7 @@
+# Set to an immutable vLLM-Omni image digest validated on the target GPU/ARM64.
+ARG VLLM_OMNI_IMAGE
+FROM ${VLLM_OMNI_IMAGE}
+WORKDIR /runtime
+COPY ledger/avatar_runtime.py ./avatar_runtime.py
+RUN python3 -c "import requests; from vllm_omni.diffusion.models.qwen_image_21.pipeline_qwen_image_21 import QwenImage21Pipeline"
+ENTRYPOINT ["python3", "/runtime/avatar_runtime.py"]

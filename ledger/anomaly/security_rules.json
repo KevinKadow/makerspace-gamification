@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "rules": [
+    {"id":"profile_member","kind":"profile_change","window_minutes":15,"count":5,"members":1,"group":"member"},
+    {"id":"profile_global","kind":"profile_change","window_minutes":15,"count":20,"members":5,"group":"global"},
+    {"id":"password_member","kind":"password_change","window_minutes":60,"count":3,"members":1,"group":"member"},
+    {"id":"password_global","kind":"password_change","window_minutes":60,"count":10,"members":5,"group":"global"},
+    {"id":"reset_member","kind":"reset_request","window_minutes":15,"count":5,"members":1,"group":"member"},
+    {"id":"reset_global","kind":"reset_request","window_minutes":15,"count":20,"members":5,"group":"global"},
+    {"id":"signup_burst","kind":"signup","window_minutes":15,"count":10,"members":10,"group":"global"}
+  ],
+  "email": {"window_minutes":60,"alias_members":3,"similar_members":4,"candidate_limit":10000},
+  "bounce": {"window_minutes":60,"count":5,"denominator":20,"fraction":0.2},
+  "privileges": {"chain_hours":48,"bulk_window_minutes":60,"bulk_members":3},
+  "learning": {"lookback_weeks":12,"minimum_comparable":8,"mad_threshold":4.0,"quantile":0.99,
+    "minimum_shadow_days":7,"minimum_shadow_windows":50,"maximum_alert_rate":0.05}
+}

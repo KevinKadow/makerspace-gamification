@@ -1,0 +1,170 @@
+# Standalone: COMPOSE_FILE=compose.anomaly.yaml bash scripts/rebuild.sh
+# Combined:   COMPOSE_FILE=compose.yaml:compose.anomaly.yaml bash scripts/rebuild.sh
+services:
+  ledger-anomaly:
+    build:
+      context: .
+      dockerfile: Dockerfile.anomaly
+    environment:
+      MLAB_URI: ${MLAB_URI:?Set a read-only source URI with collection-scoped changeStream grants}
+      MLAB_DATABASE: ${MLAB_DATABASE:-}
+      LEDGER_URI: ${LEDGER_URI:-}
+      LEDGER_DATABASE: ${LEDGER_DATABASE:-}
+      ANOMALY_DATABASE_URL: ${ANOMALY_DATABASE_URL:-postgresql://anomaly_writer:${ANOMALY_DB_PASSWORD:?Set ANOMALY_DB_PASSWORD}@anomaly-postgres:5432/ledger_anomaly}
+      ANOMALY_SCHEMA_PATH: /app/schema/manifest.json
+      ANOMALY_ENABLED: "true"
+      ANOMALY_SECURITY_ENABLED: ${ANOMALY_SECURITY_ENABLED:-false}
+      ANOMALY_SECURITY_ALERT_MODE: ${ANOMALY_SECURITY_ALERT_MODE:-active}
+      ANOMALY_SECURITY_DM_USER_IDS: ${ANOMALY_SECURITY_DM_USER_IDS:-[]}
+      ANOMALY_SECURITY_RULES_PATH: ${ANOMALY_SECURITY_RULES_PATH:-/app/ledger/anomaly/security_rules.json}
+      ANOMALY_SECURITY_EVALUATION_SECONDS: ${ANOMALY_SECURITY_EVALUATION_SECONDS:-15}
+      ANOMALY_TIMEZONE: ${ANOMALY_TIMEZONE:-America/New_York}
+      ANOMALY_MIN_COHORT_SIZE: ${ANOMALY_MIN_COHORT_SIZE:-5}
+      ANOMALY_LAPSE_GRACE_DAYS: ${ANOMALY_LAPSE_GRACE_DAYS:-30}
+      ANOMALY_EVENT_RETENTION_DAYS: ${ANOMALY_EVENT_RETENTION_DAYS:-90}
+      ANOMALY_HISTORY_MONTHS: ${ANOMALY_HISTORY_MONTHS:-60}
+      ANOMALY_BATCH_SIZE: ${ANOMALY_BATCH_SIZE:-500}
+      ANOMALY_RECONCILE_SECONDS: ${ANOMALY_RECONCILE_SECONDS:-780}
+      ANOMALY_REFERENCE_DELAY: ${ANOMALY_REFERENCE_DELAY:-60}
+      ANOMALY_REPORTING_USER: ${ANOMALY_REPORTING_DB_USER:-anomaly_reporter}
+      ANOMALY_REPORTING_PASSWORD: ${ANOMALY_REPORTING_PASSWORD:?Set ANOMALY_REPORTING_PASSWORD}
+      ANOMALY_REPORTING_DB_HOST: ${ANOMALY_REPORTING_DB_HOST:-anomaly-postgres}
+      ANOMALY_REPORTING_DB_PORT: ${ANOMALY_REPORTING_DB_PORT:-5432}
+      ANOMALY_REPORTING_DB_NAME: ${ANOMALY_REPORTING_DB_NAME:-ledger_anomaly}
+      ANOMALY_REPORTING_DB_USER: ${ANOMALY_REPORTING_DB_USER:-anomaly_reporter}
+      ANOMALY_REPORTING_DB_PASSWORD: ${ANOMALY_REPORTING_DB_PASSWORD:-${ANOMALY_REPORTING_PASSWORD:?Set ANOMALY_REPORTING_PASSWORD}}
+      ANOMALY_REPORTING_DB_SSL: ${ANOMALY_REPORTING_DB_SSL:-false}
+      ANOMALY_METABASE_URL: ${ANOMALY_METABASE_URL:-http://metabase-anomaly:3000}
+      ANOMALY_METABASE_RAW_URL: ${ANOMALY_METABASE_RAW_URL:-http://metabase-raw:3000}
+      ANOMALY_METABASE_PUBLIC_URL: ${ANOMALY_METABASE_PUBLIC_URL:-${METABASE_ANOMALY_PUBLIC_URL:-http://localhost:3001}}
+      ANOMALY_METABASE_CHAT_API_KEY: ${ANOMALY_METABASE_CHAT_API_KEY:-}
+      ANOMALY_METABASE_CHART_API_KEY: ${ANOMALY_METABASE_CHART_API_KEY:-}
+      SLACK_CHANNEL_ANOMALY: ${SLACK_CHANNEL_ANOMALY:-ledger-audit}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
+      SLACK_BOT_USER_ID: ${SLACK_BOT_USER_ID:-}
+      SLACK_TEAM_ID: ${SLACK_TEAM_ID:-}
+      SLACKIDS_INELIGIBLE: ${SLACKIDS_INELIGIBLE:-}
+      LEDGER_LLM_BASE_URL: ${LEDGER_LLM_BASE_URL:-http://ledger-ai:8000/v1}
+      LEDGER_LLM_MODEL: ${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}
+      LEDGER_LLM_API_KEY: ${LEDGER_LLM_API_KEY:-}
+      ANOMALY_LLM_BASE_URL: ${ANOMALY_LLM_BASE_URL:-${LEDGER_LLM_BASE_URL:-http://ledger-ai:8000/v1}}
+      ANOMALY_LLM_MODEL: ${ANOMALY_LLM_MODEL:-${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}}
+      ANOMALY_LLM_API_KEY: ${ANOMALY_LLM_API_KEY:-${LEDGER_LLM_API_KEY:-}}
+      LEDGER_PROMPT_MATRIX_DOC_URL: ${LEDGER_PROMPT_MATRIX_DOC_URL:-}
+      LEDGER_PROMPT_MATRIX_GOOGLE_ACCESS_TOKEN: ${LEDGER_PROMPT_MATRIX_GOOGLE_ACCESS_TOKEN:-}
+      MQTT_HOST: ${MQTT_HOST:-localhost}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_TLS: ${MQTT_TLS:-false}
+      MQTT_CLIENT_ID: ${ANOMALY_MQTT_CLIENT_ID:-ledger-anomaly}
+      ANOMALY_SYSLOG_HOST: ${ANOMALY_SYSLOG_HOST:-}
+      ANOMALY_SYSLOG_PORT: ${ANOMALY_SYSLOG_PORT:-6514}
+      ANOMALY_SYSLOG_TRANSPORT: ${ANOMALY_SYSLOG_TRANSPORT:-tls}
+      ANOMALY_SYSLOG_CA_FILE: ${ANOMALY_SYSLOG_CA_FILE:-}
+      ANOMALY_SLACK_ALERT_MODE: ${ANOMALY_SLACK_ALERT_MODE:-shadow}
+    depends_on:
+      anomaly-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-m", "ledger.anomaly", "ready"]
+      interval: 30s
+      timeout: 15s
+      start_period: 2m
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+  anomaly-postgres:
+    image: ${ANOMALY_POSTGRES_IMAGE:-postgres:17-alpine}
+    environment:
+      POSTGRES_USER: anomaly_owner
+      POSTGRES_PASSWORD: ${ANOMALY_POSTGRES_PASSWORD:?Set ANOMALY_POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+      ANOMALY_DB_PASSWORD: ${ANOMALY_DB_PASSWORD:?Set ANOMALY_DB_PASSWORD}
+      ANOMALY_REPORTING_PASSWORD: ${ANOMALY_REPORTING_PASSWORD:?Set ANOMALY_REPORTING_PASSWORD}
+      METABASE_ANOMALY_DB_PASSWORD: ${METABASE_ANOMALY_DB_PASSWORD:?Set METABASE_ANOMALY_DB_PASSWORD}
+      METABASE_RAW_DB_PASSWORD: ${METABASE_RAW_DB_PASSWORD:?Set METABASE_RAW_DB_PASSWORD}
+    volumes:
+      - anomaly-postgres:/var/lib/postgresql/data
+      - ./deployment/postgres/01-anomaly-databases.sh:/docker-entrypoint-initdb.d/01-anomaly-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U anomaly_owner -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  metabase-anomaly:
+    build: &metabase-build
+      context: ${METABASE_SOURCE_DIR:-../metabase}
+      args:
+        MB_EDITION: oss
+        # bin/build.sh uses Clojure -X: the build argument must contain EDN quotes.
+        VERSION: '"${METABASE_VERSION:-v0.0.0-anomaly}"'
+    image: makerspace-metabase:${METABASE_VERSION:-v0.0.0-anomaly}
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: anomaly-postgres
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase_anomaly
+      MB_DB_USER: metabase_anomaly
+      MB_DB_PASS: ${METABASE_ANOMALY_DB_PASSWORD:?Set METABASE_ANOMALY_DB_PASSWORD}
+      MB_ENCRYPTION_SECRET_KEY: ${METABASE_ANOMALY_ENCRYPTION_KEY:?Set METABASE_ANOMALY_ENCRYPTION_KEY}
+      MB_SITE_URL: ${METABASE_ANOMALY_PUBLIC_URL:-http://localhost:3001}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_ENABLE_PUBLIC_SHARING: "false"
+      MB_ANOMALY_ANALYTICS_ONLY: "true"
+      MB_AI_FEATURES_ENABLED: "true"
+      MB_METABOT_ENABLED: "true"
+      MB_METABOT_QUERY_EXECUTION_ENABLED: "true"
+      MB_METABOT_SQL_EXECUTION_ENABLED: "false"
+      MB_LLM_ALLOWED_NETWORKS: allow-private
+      MB_LLM_METABOT_PROVIDER: vllm/${ANOMALY_LLM_MODEL:-${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}}
+      MB_LLM_MINI_MODEL: vllm/${ANOMALY_LLM_MODEL:-${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}}
+      MB_LLM_VLLM_API_BASE_URL: ${ANOMALY_LLM_BASE_URL:-${LEDGER_LLM_BASE_URL:-http://ledger-ai:8000/v1}}
+      MB_LLM_VLLM_API_KEY: ${ANOMALY_LLM_API_KEY:-${LEDGER_LLM_API_KEY:-}}
+    ports: ["127.0.0.1:${METABASE_ANOMALY_PORT:-3001}:3000"]
+    depends_on:
+      anomaly-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/api/health"]
+      start_period: 3m
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+  # A separate Metabase application database isolates direct source exploration
+  # from the derived-only workspace used by Slack analytics tools.
+  metabase-raw:
+    build: *metabase-build
+    image: makerspace-metabase:${METABASE_VERSION:-v0.0.0-anomaly}
+    pull_policy: never
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: anomaly-postgres
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase_raw
+      MB_DB_USER: metabase_raw
+      MB_DB_PASS: ${METABASE_RAW_DB_PASSWORD:?Set METABASE_RAW_DB_PASSWORD}
+      MB_ENCRYPTION_SECRET_KEY: ${METABASE_RAW_ENCRYPTION_KEY:?Set METABASE_RAW_ENCRYPTION_KEY}
+      MB_SITE_URL: ${METABASE_RAW_PUBLIC_URL:-http://localhost:3002}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_ENABLE_PUBLIC_SHARING: "false"
+      MB_AI_FEATURES_ENABLED: "false"
+    ports: ["127.0.0.1:${METABASE_RAW_PORT:-3002}:3000"]
+    depends_on:
+      anomaly-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3000/api/health"]
+      start_period: 3m
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  anomaly-postgres:
