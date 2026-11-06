@@ -1,0 +1,105 @@
+{
+  "_metadata": {
+    "major_version": 1,
+    "minor_version": 1
+  },
+  "display_information": {
+    "name": "The Ledger",
+    "description": "Learn, make, mentor, and recognize your makerspace community",
+    "background_color": "#1C1C1C"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "The Ledger",
+      "always_online": true
+    },
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "slash_commands": [
+      {
+        "command": "/ledger",
+        "description": "Join, leave, view progress, or sponsor a maker",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      },
+      {
+        "command": "/ledger-skills",
+        "description": "Explore your shop skill trees",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      },
+      {
+        "command": "/ledger-quests",
+        "description": "Explore challenges and collaborative quests",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      },
+      {
+        "command": "/ledger-mentor",
+        "description": "Offer buddy support and record mentoring",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      },
+      {
+        "command": "/kudos",
+        "description": "Thank a maker, privately or in Ledge Chat",
+        "usage_hint": "@member",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      },
+      {
+        "command": "/ledger-project",
+        "description": "Share a project and seek feedback",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      },
+      {
+        "command": "/ledger-admin",
+        "description": "Configure ranks, messages, catalogs, and verification",
+        "url": "https://LEDGER_HOST/slack/commands",
+        "should_escape": true
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "chat:write",
+        "commands",
+        "groups:history",
+        "groups:read",
+        "groups:write",
+        "im:history",
+        "im:write",
+        "users:read",
+        "files:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://LEDGER_HOST/slack/events",
+      "bot_events": [
+        "app_home_opened",
+        "app_mention",
+        "message.groups",
+        "message.im",
+        "member_joined_channel",
+        "member_left_channel",
+        "user_change"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://LEDGER_HOST/slack/interactions",
+      "message_menu_options_url": "https://LEDGER_HOST/slack/interactions"
+    },
+    "socket_mode_enabled": false,
+    "org_deploy_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
