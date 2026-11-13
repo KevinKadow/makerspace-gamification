@@ -20,6 +20,11 @@ x-ledger-environment: &ledger-environment
   LEDGER_CHANNELS: ${LEDGER_CHANNELS:-}
   LEDGER_QUEST_REVIEW_CHANNEL_ID: ${LEDGER_QUEST_REVIEW_CHANNEL_ID:-}
   LEDGER_QUEST_CONTEXT_LIMIT: ${LEDGER_QUEST_CONTEXT_LIMIT:-8192}
+  LEDGER_KNOWLEDGE_ENABLED: ${LEDGER_KNOWLEDGE_ENABLED:-false}
+  LEDGER_KNOWLEDGE_AMBIENT_CHANNELS: ${LEDGER_KNOWLEDGE_AMBIENT_CHANNELS:-}
+  LEDGER_EMBEDDING_URL: ${LEDGER_EMBEDDING_URL:-http://ledger-embeddings:80}
+  LEDGER_CHROMA_HOST: ${LEDGER_CHROMA_HOST:-ledger-chroma}
+  LEDGER_CHROMA_PORT: ${LEDGER_CHROMA_PORT:-8000}
   LEDGER_LLM_BASE_URL: ${LEDGER_LLM_BASE_URL:-http://ledger-ai:8000/v1}
   LEDGER_LLM_MODEL: ${LEDGER_LLM_MODEL:-nvidia/Qwen3.8-27B-NVFP4}
   LEDGER_LLM_API_KEY: ${LEDGER_LLM_API_KEY:?Set a shared vLLM API key in .env}
@@ -47,6 +52,30 @@ x-ledger-environment: &ledger-environment
   MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-makerspace-ledger}
 
 services:
+  ledger-embeddings:
+    profiles: [knowledge]
+    image: ${LEDGER_EMBEDDING_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-1.9.4}
+    command: ["--model-id", "nomic-ai/nomic-embed-text-v1.5", "--revision", "8be05e7fb7837804dea1b34f1634e7cf7f8da434", "--port", "80"]
+    environment:
+      AUTO_TRUNCATE: "false"
+      HUGGINGFACE_HUB_CACHE: /data
+    volumes:
+      - embedding-cache:/data
+    expose: ["80"]
+    restart: unless-stopped
+
+  ledger-chroma:
+    profiles: [knowledge]
+    image: ${LEDGER_CHROMA_IMAGE:-chromadb/chroma:1.0.20}
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /data
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - knowledge-vectors:/data
+    expose: ["8000"]
+    restart: unless-stopped
+
   ledger-avatars:
     profiles: [avatars]
     build: .
@@ -212,3 +241,5 @@ volumes:
   huggingface-cache:
   avatar-spool:
   image-spool:
+  embedding-cache:
+  knowledge-vectors:

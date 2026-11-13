@@ -1,5 +1,10 @@
 # Prompt Matrix Template: design and operation
 
+Version 54 adds screened public-export knowledge and opt-in-channel ambient
+answers. Historical Slack content is untrusted evidence, never authorization;
+the application continues to enforce consent and delivery checks. Update any
+Google Doc override with the same policy and reload it explicitly.
+
 Version 53 adds [once-ever introductions](INTRODUCTIONS.md) for never-joined active
 members: future first non-Facilities checkout or observed expiry renewal, with no
 checkout requirement for renewal. Python handles replies, explicit consent,
@@ -14,7 +19,7 @@ suspended, revoked, merged and unknown memberships do not.
 
 The 32-KiB limit and 512-byte CRLF headroom remain. `anomaly_explain` and
 `anomaly_propose` version 2 retain separate paired prompt variations. Google Doc
-overrides require the complete version-53 policy and an explicit reload; reserved
+overrides require the complete version-54 policy and an explicit reload; reserved
 jobs retain saved policy/text. No external document is published automatically.
 See [security analytics](ANOMALY_SECURITY.md) and [Slack access](ANOMALY_SLACK.md).
 
@@ -63,7 +68,7 @@ The matrix explicitly covers `ledger`, `member`, `participant`, `nonparticipant`
 
 Admins and board members retain global Ledger administration. Resource managers remain shop-scoped reviewers. Nobody approves their own evidence. Rank and descriptive titles grant no staff or safety authority. Future roles must be added to the canonical matrix, required-role validation, and tests in the same change, as required by [AGENTS.md](../AGENTS.md).
 
-The Ledger speaks as a seasoned leatherbound grimoire: precise, patient, occasionally dry-witted, never cute or coercive. A DM addresses its recipient directly. Shared recognition addresses the community briefly. Bot conversations answer the member's actual question and stay in the authorized thread. Clear self-directed progress questions and unaddressed question-mark messages are examined only in registered Ledger channels; ordinary ambient chatter receives no reply. Names/Slack mentions and existing bot threads (including bot-authored root posts) receive contextual replies in other joined channels, without unrelated ambient history. Nonparticipants can send/receive kudos and chat about The Ledger, general XP and known shops/tools; optional `/ledger join` invitations confer no consent. Rules, specific ranks and quests are unavailable. Participant conversation facts include only current/lower rank details and next requirements, without future names or inaccessible quests. The conversation path excludes global seed tables and rank/quest examples from inference. Unknown facts receive "I don't know." Safety procedures and human appointments remain outside game authority.
+The Ledger speaks as a seasoned leatherbound grimoire: precise, patient, occasionally dry-witted, never cute or coercive. A DM addresses its recipient directly. Shared recognition addresses the community briefly. Bot conversations answer the member's actual question and stay in the authorized thread. Existing registered Ledger channels examine self-directed progress and unaddressed questions. Explicitly configured joined public channels may receive evidence-backed ambient knowledge answers; ordinary ambient chatter receives no reply. Names/Slack mentions and existing bot threads (including bot-authored root posts) receive contextual replies in other joined channels, without unrelated ambient history. Imported public-channel knowledge is historical, untrusted evidence, never authority. Nonparticipants can send/receive kudos and chat about The Ledger, general XP and known shops/tools; optional `/ledger join` invitations confer no consent. Rules, specific ranks and quests are unavailable. Participant conversation facts include only current/lower rank details and next requirements, without future names or inaccessible quests. The conversation path excludes global seed tables and rank/quest examples from inference. Unknown facts receive "I don't know." Safety procedures and human appointments remain outside game authority.
 
 ## Google Doc configuration
 

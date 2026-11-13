@@ -234,7 +234,7 @@ def test_packaged_result_styles_and_policy_preserve_schema():
             assert "optional" in variants[-1]["system"]
             assert len({v["user"] for v in variants}) == 5
     matrix = bundled_matrix()
-    assert matrix["version"] == "53" and len(matrix["text"].encode()) <= MAX_MATRIX_BYTES
+    assert matrix["version"] == "54" and len(matrix["text"].encode()) <= MAX_MATRIX_BYTES
     root = ElementTree.fromstring(matrix["text"])
     assert {role.get("id") for role in root.find("roles")} == REQUIRED_ROLES
     assert "sixty seconds" in root.find("kudos").text

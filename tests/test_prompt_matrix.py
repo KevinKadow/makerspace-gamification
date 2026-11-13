@@ -37,7 +37,7 @@ def fake_connection(raw, *, status=200, content_type='text/plain; charset=utf-8'
 
 def test_bundled_matrix_codifies_roles_and_seed_economy():
     matrix = bundled_matrix()
-    assert matrix['version'] == '53'
+    assert matrix['version'] == '54'
     root = ElementTree.fromstring(matrix['text'])
     kudos = root.find('kudos').text
     assert 'activeMember/pending/inactive/nonMember/expired' in kudos
@@ -96,7 +96,7 @@ def test_bundled_matrix_codifies_roles_and_seed_economy():
     assert 'only their own invites' in sponsor and 'latest opt-in/out dates' in sponsor
     assert 'First sponsor keeps credit' in sponsor and 'grants no consent' in sponsor
     assert 'In registered Ledger channels only' in root.find('channels').text
-    assert 'reject stale ambient jobs before inference' in root.find('channels').text
+    assert 'Reject stale/disabled ambient jobs before inference/delivery' in root.find('channels').text
     channels = root.find('channels').text
     assert 'Qwen gets only count/timeframe' in channels
     assert 'Python rejects altered facts/identifier terms' in channels
@@ -148,10 +148,14 @@ def test_bundled_matrix_codifies_roles_and_seed_economy():
     assert 'if deleted,post a replacement & save its timestamp' in root.find('community').text
     assert 'skip current fingerprints & settled history writes' in root.find('community').text
     assert 'immutable version-specific IDs' in root.find('community').text
+    rank_rows = [[cell.strip() for cell in line.strip('|').split('|')]
+                 for line in root.find('progression').text.splitlines() if '|' in line]
+    xp_rows = [[cell.strip() for cell in line.strip('|').split('|')]
+               for line in root.find('economy').text.splitlines() if '|' in line]
     for i, (name, _, floor, _) in enumerate(RANKS, 1):
-        assert f'| {i} | {name} | {floor if floor is not None else "Inactive"} |' in root.find('progression').text
+        assert [str(i), name, str(floor if floor is not None else 'Inactive')] in [row[:3] for row in rank_rows]
     for rate in XP.values():
-        assert f'| {rate} |' in root.find('economy').text
+        assert any(len(row) == 2 and row[1] == str(rate) for row in xp_rows)
     # Catch new literal authorization roles in the application, not only hand-maintained IDs.
     found = set()
     for path in (Path(__file__).parents[1] / 'ledger').glob('*.py'):

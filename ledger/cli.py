@@ -147,13 +147,42 @@ def bootstrap(ledger, client):
 
 def main():
     parser = argparse.ArgumentParser(description="The Ledger")
-    parser.add_argument("action", choices=["init", "bootstrap", "serve", "worker", "reconcile", "dry-run", "prompt-matrix", "prepare-reads", "slack-check"])
+    parser.add_argument("action", choices=["init", "bootstrap", "serve", "worker", "reconcile", "dry-run", "prompt-matrix", "prepare-reads", "slack-check", "knowledge-import", "knowledge-remove", "knowledge-list"])
+    parser.add_argument("--export", help="Native Slack export ZIP for knowledge-import")
+    parser.add_argument("--thread-id", help="Workspace:channel:thread timestamp for knowledge-remove")
     parser.add_argument("--socket", action="store_true", help="For slack-check: open a temporary Socket Mode connection; stop normal ingress first")
     parser.add_argument("--verify", action="store_true", help="Compare prepared optimized reads with legacy reads without sending messages")
     parser.add_argument("--port", type=int, default=3000)
     parser.add_argument("--queue", choices=["all", "inbox", "outbox", "channels", "engagement", "results", "interactive", "avatars"], default="all")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if args.action in ("knowledge-import", "knowledge-remove", "knowledge-list"):
+        from .slack_knowledge_import import COLLECTION, KnowledgeImporter, QwenDistiller
+        from .knowledge_index import KnowledgeIndex
+        ledger = database_ledger()
+        ledger.store.ready()
+        ledger.sources.ready()
+        if args.action == "knowledge-list":
+            records = ledger.store.select(COLLECTION, {"status": {"$in": ["quarantine", "pending", "removed"]}},
+                                          projection={"_id": 1, "status": 1, "reason": 1, "updated_at": 1}, limit=1000)
+            print(json.dumps(records, default=str))
+            return
+        index = KnowledgeIndex.from_env(ledger.store, ledger.sources)
+        api = ChatAPI(os.environ.get("LEDGER_LLM_BASE_URL", "http://localhost:8000/v1"),
+                      os.environ.get("LEDGER_LLM_MODEL", DEFAULT_MODEL), os.environ.get("LEDGER_LLM_API_KEY", ""), deadline=90)
+        importer = KnowledgeImporter(ledger.store, QwenDistiller(api, context_limit=int(os.environ.get("VLLM_MAX_MODEL_LEN", "16384"))), index)
+        if args.action == "knowledge-remove":
+            if not args.thread_id:
+                parser.error("knowledge-remove requires --thread-id")
+            print(json.dumps({"removed": importer.remove(args.thread_id)}))
+            return
+        if not args.export:
+            parser.error("knowledge-import requires --export")
+        result = importer.import_zip(args.export, os.environ.get("SLACK_TEAM_ID", ""))
+        print(json.dumps(result))
+        if result["error"] or result["busy"]:
+            raise SystemExit(1)
+        return
     if args.action == "slack-check":
         from .slack_check import run
         result = run(socket=args.socket)

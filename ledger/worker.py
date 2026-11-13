@@ -2,6 +2,7 @@
 import hashlib
 import json
 import logging
+import os
 from copy import deepcopy
 import urllib.request
 from pathlib import Path
@@ -26,6 +27,18 @@ from .views import home, home_private_metadata, home_processing
 log = logging.getLogger(__name__)
 
 
+def knowledge_ambient_configured(channel):
+    from .query_tools import knowledge_enabled
+    channels = {value.strip() for value in os.environ.get("LEDGER_KNOWLEDGE_AMBIENT_CHANNELS", "").split(",")}
+    return bool(knowledge_enabled() and re.fullmatch(r"C[A-Z0-9]+", channel or "") and channel in channels)
+
+
+def ambient_question(text):
+    """Recognize explicit questions and conservative punctuation-free forms."""
+    return bool(isinstance(text, str) and ("?" in text or re.match(
+        r"^\s*(?:what|where|when|how|why|who|which|can|could|does|is|are)\b\s+\S", text, re.I)))
+
+
 class HistoryImportPending(RuntimeError):
     """Welcome delivery waits for the accounting worker, without spending retries."""
 
@@ -34,6 +47,40 @@ class Worker:
     def __init__(self, ledger, composer, slack, mqtt=None, bot_id=""):
         self.ledger, self.store = ledger, ledger.store
         self.composer, self.slack, self.mqtt, self.bot_id = composer, slack, mqtt, bot_id
+
+    def knowledge_ambient_allowed(self, channel, member_id):
+        from .engagement import enabled, observe_allowed
+        if not knowledge_ambient_configured(channel) or not enabled("OBSERVATION") or not observe_allowed(self.ledger, member_id):
+            return False
+        info = self.slack.conversations_info(channel=channel)["channel"]
+        if info.get("is_member") is not True or info.get("is_channel") is not True or info.get("is_private") is True:
+            return False
+        profile = self.ledger.preference_profile(member_id)
+        notice = self.store.get("ledger_evidence", f"knowledge-notice:{member_id}:{profile.get('observation_generation', 0)}")
+        return bool(notice and notice.get("delivered_at"))
+
+    def queue_knowledge_ambient_notice(self, channel, member_id):
+        """Notify without retaining the triggering question or its contents."""
+        from .engagement import Engagement, enabled, observe_allowed
+        if knowledge_ambient_configured(channel) and enabled("OBSERVATION"):
+            Engagement(self.ledger).notice(member_id)
+        if not knowledge_ambient_configured(channel) or not enabled("OBSERVATION") or not observe_allowed(self.ledger, member_id):
+            return
+        profile = self.ledger.preference_profile(member_id)
+        generation = profile.get("observation_generation", 0)
+        key = f"knowledge-notice:{member_id}:{generation}"
+        if self.store.get("ledger_evidence", key):
+            return
+        def queue(s):
+            existing = s.get("ledger_outbox", key)
+            if existing and existing.get("status") in ("failed", "cancelled"):
+                existing.update(status="pending", attempts=0, available_at=now())
+                existing.pop("lease", None)
+                s.put("ledger_outbox", existing)
+            else:
+                enqueue(s, "ledger_outbox", key, "knowledge_ambient_notice", {"member_id": member_id,
+                    "channel": channel, "observation_generation": generation, "exception": True})
+        self.store.atomic(queue)
 
     def step(self, collection, kinds=None, exclude=None):
         if collection == "ledger_outbox":
@@ -82,6 +129,19 @@ class Worker:
                 current.update(status=status, available_at=now() + timedelta(seconds=delay), last_error=error)
                 if deferred:
                     current["attempts"] = max(0, current.get("attempts", 1) - 1)
+                if collection == "ledger_inbox" and current.get("kind") == "slack_event" and status in ("done", "failed", "cancelled"):
+                    payload = current.get("payload") or {}
+                    configured = {value.strip() for value in os.environ.get("LEDGER_KNOWLEDGE_AMBIENT_CHANNELS", "").split(",")}
+                    if payload.get("type") == "message" and payload.get("channel") in configured:
+                        # Keep event identifiers for deduplication and ticket recovery, but
+                        # never retain completed ambient-channel message bodies in the inbox.
+                        for field in ("text", "blocks", "attachments", "files"):
+                            payload.pop(field, None)
+                        for nested in ("message", "previous_message"):
+                            if isinstance(payload.get(nested), dict):
+                                for field in ("text", "blocks", "attachments", "files"):
+                                    payload[nested].pop(field, None)
+                        current["payload"] = payload
                 s.put(collection, current)
                 if collection == "ledger_outbox" and job["kind"] == "kudos_submit" and status == "failed":
                     from .kudos_submission import failed
@@ -215,7 +275,10 @@ class Worker:
             return None
         user = self.slack.users_info(user=slack_id)["user"]
         invalid = bool(user.get("deleted") or user.get("is_bot") or slack_id == "USLACKBOT")
-        self.store.atomic(lambda s: s.put("ledger_catalog", {"_id": f"identity:{member_id}", "deactivated": invalid, "bot": bool(user.get("is_bot")), "at": now()}))
+        deleted = user.get("deleted") if type(user.get("deleted")) is bool else None
+        bot = user.get("is_bot") if type(user.get("is_bot")) is bool else None
+        self.store.atomic(lambda s: s.put("ledger_catalog", {"_id": f"identity:{member_id}", "slack_id": slack_id,
+            "deactivated": True if slack_id == "USLACKBOT" else deleted, "bot": bot, "at": now()}))
         return None if invalid else slack_id
 
     def queue_sponsorship_reminder_followup(self, member_id, event, accepted_member_id=None):
@@ -718,7 +781,10 @@ class Worker:
                         row.pop("profile_photo_described_at", None)
                         s.put("ledger_homes", row)
                 self.store.atomic(clear_photo_description)
-                self.store.atomic(lambda s: s.put("ledger_catalog", {"_id": f"identity:{member_id}", "deactivated": bool(user.get("deleted")), "bot": bool(user.get("is_bot")), "at": now()}))
+                deleted = user.get("deleted") if type(user.get("deleted")) is bool else None
+                bot = user.get("is_bot") if type(user.get("is_bot")) is bool else None
+                self.store.atomic(lambda s: s.put("ledger_catalog", {"_id": f"identity:{member_id}", "slack_id": user["id"],
+                    "deactivated": deleted, "bot": bot, "at": now()}))
                 self.ledger.reconcile(member_id)
                 if not user.get("deleted") and not user.get("is_bot") and self.ledger.active(member_id):
                     def queue_photo_refresh(s):
@@ -900,34 +966,60 @@ class Worker:
         thread = event.get("thread_ts") or event.get("ts")
         addressed = self.chat_addressed(text, kind, is_dm)
         continuing = self.store.get("ledger_context", f"thread:{channel}:{thread}")
+        ambient_knowledge = False
         if not is_dm and channel not in managed:
             if not (addressed or continuing):
-                return "ignored_unaddressed_channel_message"
+                if not ambient_question(text) or not knowledge_ambient_configured(channel):
+                    return "ignored_unaddressed_channel_message"
+                from .slack_knowledge_import import sensitive_text
+                if sensitive_text(text):
+                    return "ignored_unaddressed_channel_message"
+                info = self.slack.conversations_info(channel=channel)["channel"]
+                if info.get("is_member") is not True or info.get("is_channel") is not True or info.get("is_private") is True:
+                    return "ignored_unjoined_channel"
+                if not self.knowledge_ambient_allowed(channel, member_id):
+                    self.queue_knowledge_ambient_notice(channel, member_id)
+                    return "ignored_unaddressed_channel_message"
+                ambient_knowledge = True
             # Slack may deliver mentions from channels the bot has not joined.
-            info = self.slack.conversations_info(channel=channel)["channel"]
-            if info.get("is_member") is not True:
+            elif self.slack.conversations_info(channel=channel)["channel"].get("is_member") is not True:
                 return "ignored_unjoined_channel"
+        if ambient_knowledge:
+            def reserve_ambient(s):
+                key = f"knowledge-ambient-cooldown:{channel}"
+                current = s.get("ledger_context", key)
+                stamp = now()
+                if current and current.get("next_at", stamp) > stamp and current.get("message_ts") != event["ts"]:
+                    return False
+                s.put("ledger_context", {"_id": key, "kind": "knowledge_ambient_cooldown", "message_ts": event["ts"],
+                    "next_at": stamp + timedelta(minutes=2), "expires_at": stamp + timedelta(minutes=5)})
+                return True
+            if not self.store.atomic(reserve_ambient):
+                return "ignored_ambient_cooldown"
         message_id = f"message:{channel}:{event['ts']}"
         self.store.atomic(lambda s: s.put("ledger_context", {"_id": message_id, "kind": "message", "member_id": member_id,
             "channel": channel, "thread": thread, "text": text[:6000], "at": event["ts"], "at_order": float(event["ts"]), "conversation_requested": bool(addressed or continuing),
             "participating": self.ledger.active(member_id), "consent_generation": (self.ledger.participant(member_id) or {}).get("consent_generation", 0),
             "expires_at": now() + timedelta(days=30)}))
         from .conversations import self_progress_question
-        # Recognition selects tools; only managed channels may trigger ambient replies.
+        # Registered Ledger channels retain their existing ambient behavior;
+        # other public channels use the separately gated knowledge path above.
         progress_request = self.ledger.active(member_id) and self_progress_question(text)
         if not is_dm:
             from .engagement import Engagement
             Engagement(self.ledger).capture(member_id, message_id, "message", text, channel, datetime.fromtimestamp(float(event["ts"]), timezone.utc))
         question = "?" in text
-        if addressed or continuing or (channel in managed and (progress_request or question)):
+        if addressed or continuing or ambient_knowledge or (channel in managed and (progress_request or question)):
+            from .query_tools import knowledge_enabled
             def write(s):
                 enqueue(s, "ledger_outbox", f"reply:{channel}:{event['ts']}", "conversation", {"member_id": member_id, "channel": channel,
                         "thread": thread, "text": text[:6000], "message_id": message_id, "progress_request": progress_request,
                         "slack_id": event.get("user"),
                         "exception": True, "participating": self.ledger.active(member_id),
                         "consent_generation": (self.ledger.participant(member_id) or {}).get("consent_generation", 0),
-                        "ambient": not (addressed or continuing or progress_request),
-                        "use_tools": question or progress_request or bool(re.search(r"\b(shop|shops|tool|tools|clearances|volunteer|downtime|sponsor(?:ed|ships?)?|invit(?:e(?:d|s|es?)?|ing|ations?)|what|where|when|how|can|does|tell me about)\b", text, re.I))})
+                        "ambient": ambient_knowledge or not (addressed or continuing or progress_request),
+                        "ambient_knowledge": ambient_knowledge,
+                        "use_tools": question or progress_request or ambient_knowledge or (knowledge_enabled() and bool(addressed or continuing)) or bool(re.search(r"\b(shop|shops|tool|tools|clearances|volunteer|downtime|sponsor(?:ed|ships?)?|invit(?:e(?:d|s|es?)?|ing|ations?)|what|where|when|how|can|does|tell me about)\b", text, re.I))})
             self.store.atomic(write)
             return "reply_queued"
         return "ignored_unaddressed_channel_message"
@@ -1904,6 +1996,32 @@ class Worker:
                     d.save_preference_profile(participant)
             self.store.atomic(notice_receipt)
             return
+        if kind == "knowledge_ambient_notice":
+            from .engagement import enabled, observe_allowed
+            profile = self.ledger.preference_profile(member_id)
+            info = self.slack.conversations_info(channel=p["channel"])["channel"]
+            if (not knowledge_ambient_configured(p["channel"]) or not enabled("OBSERVATION")
+                    or not observe_allowed(self.ledger, member_id)
+                    or profile.get("observation_generation", 0) != p["observation_generation"]
+                    or info.get("is_member") is not True or info.get("is_channel") is not True or info.get("is_private") is True):
+                raise Denied("Knowledge replies are no longer enabled.")
+            text = ("Staff enabled The Ledger to consider public questions in selected channels and, when useful, "
+                    "answer using imported public Slack discussions. This is separate from audit-only observation; "
+                    "neither changes XP, ranks, or permissions. To opt out of these ambient replies, use /ledger preferences "
+                    "and uncheck Allow observation. Direct questions to The Ledger still work.")
+            dm = self.slack.conversations_open(users=uid)["channel"]["id"]
+            self.assert_live_job(job)
+            if (not knowledge_ambient_configured(p["channel"]) or not observe_allowed(self.ledger, member_id)
+                    or self.ledger.preference_profile(member_id).get("observation_generation", 0) != p["observation_generation"]):
+                raise Denied("Knowledge reply preferences changed.")
+            response = self.post_message(channel=dm, text=text, blocks=[section(text), {"type": "actions", "elements": [button("Preferences", "preferences", "")]}], client_msg_id=str(uuid5(NAMESPACE_URL, job["_id"])) )
+            def record(s):
+                d = Ledger(s, self.ledger.sources)
+                if d.preference_profile(member_id).get("observation_generation", 0) == p["observation_generation"]:
+                    s.put("ledger_evidence", {"_id": job["_id"], "kind": "knowledge_ambient_notice", "member_id": member_id,
+                        "observation_generation": p["observation_generation"], "delivered_at": now(), "slack_ts": response["ts"]})
+            self.store.atomic(record)
+            return
         if kind == "quest_draft":
             from .quests import Quests
             from . import views
@@ -2030,7 +2148,10 @@ class Worker:
             if unrelated:
                 requested = (request.get("conversation_requested") or self.chat_addressed(request["text"]) or
                              self.store.get("ledger_context", f"thread:{p['channel']}:{p['thread']}"))
-                if p.get("ambient") or not requested:
+                if p.get("ambient_knowledge"):
+                    if not p.get("ambient") or not self.knowledge_ambient_allowed(p["channel"], member_id):
+                        raise Denied("Knowledge ambient reply is no longer authorized.")
+                elif p.get("ambient") or not requested:
                     raise Denied("Ambient questions require a registered Ledger channel.")
             from .context_reads import history as read_history
             history = read_history(self.ledger, p, unrelated)
@@ -2069,7 +2190,8 @@ class Worker:
                     composed = {"text": response_text, "outcome": "generated", "tool_calls": [], "latency": 0}
                 else:
                     composed = converse(self.ledger, self.composer, member_id, request["text"], history,
-                        p["channel"].startswith("D"), selection, use_tools=p.get("use_tools", False), ambient=p.get("ambient", False))
+                        p["channel"].startswith("D"), selection, use_tools=p.get("use_tools", False), ambient=p.get("ambient", False),
+                        ambient_knowledge=p.get("ambient_knowledge", False))
                 composed.update(matrix_version=selection["matrix"]["version"], matrix_sha256=selection["matrix"]["sha256"],
                     prompt_variation=(selection["template"].get("variations") or [{}])[0].get("id"), prompt_scope=selection["scope"])
                 def save(s):
@@ -2086,6 +2208,19 @@ class Worker:
                     (self.ledger.participant(member_id) or {}).get("consent_generation", 0) != p.get("consent_generation", 0) or
                     not latest_request or latest_request["text"] != request["text"]):
                 raise Denied("Member opted out during generation.")
+            if p.get("ambient_knowledge") and not self.knowledge_ambient_allowed(p["channel"], member_id):
+                raise Denied("Knowledge ambient reply is no longer authorized.")
+            if p.get("ambient_knowledge") and self.valid_identity(member_id) != p.get("slack_id"):
+                raise Denied("Knowledge ambient reply identity changed.")
+            if composed.get("knowledge_sources"):
+                from .query_tools import knowledge_enabled
+                try:
+                    from .knowledge_index import KnowledgeIndex
+                    valid = knowledge_enabled() and KnowledgeIndex.from_env(self.store, self.ledger.sources).valid_evidence(composed["knowledge_sources"])
+                except Exception:
+                    valid = False
+                if not valid:
+                    raise Denied("Knowledge evidence is no longer available.")
             if not composed["text"]:
                 return
             from .conversations import restricted_answer

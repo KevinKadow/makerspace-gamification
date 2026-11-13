@@ -19,6 +19,12 @@ their collection/index inventory tests cover it. Requests, current image pairs,
 references and metrics use `LEDGER_URI`; source reads remain on `MLAB_URI`.
 See [avatar storage and lifecycle](AVATARS.md).
 
+Public Slack knowledge imports use the owned `ledger_knowledge` collection,
+with `find`, `insert`, and `update` privileges. It stores screened messages,
+distilled records, leases and tombstones via `LEDGER_URI`; role lookups use the
+existing read-only `MLAB_URI` source grants. The role examples and inventory
+tests include this collection. See [knowledge operations](SLACK_KNOWLEDGE.md).
+
 The service creates independent PyMongo clients for its two data sources:
 
 | Setting | Purpose |

@@ -4,6 +4,9 @@ An opt-in Slack world system for makerspace members. The journey is **learn → 
 
 The implementation is a Python Slack Bolt application with durable Mongo inbox/outbox workers, a vLLM Chat Completions composer, and MQTT reconciliation. Rails and React collections remain read-only. No game rank grants tool access or administrative authority.
 
+The optional [public Slack knowledge pipeline](docs/SLACK_KNOWLEDGE.md) imports
+and incrementally distills exports for evidence-backed conversations.
+
 The optional [anomaly analytics stack](docs/ANOMALY_ANALYTICS.md) adds schema monitoring, persistent baselines, outcome research, authorized Slack analytics, and separate curated/raw Metabase instances. It can run on another host and refreshes Rails schema contracts before each rebuild.
 
 ## Run locally

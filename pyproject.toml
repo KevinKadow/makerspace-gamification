@@ -13,6 +13,7 @@ dependencies = ["pymongo>=4.10,<5", "slack-bolt>=1.23,<2", "websocket-client>=1.
 [project.optional-dependencies]
 test = ["pytest>=8,<10", "PyYAML>=6,<7"]
 server = ["gunicorn>=23,<24; sys_platform != 'win32'"]
+knowledge = ["langchain-chroma==0.2.4", "chromadb==1.0.20", "langchain-core>=0.3.72,<1", "langchain-text-splitters>=0.3,<0.4", "tiktoken>=0.8,<1"]
 anomaly = ["psycopg[binary]>=3.2,<4", "numpy>=1.26,<3", "scikit-learn>=1.5,<2", "python-dateutil>=2.9,<3"]
 
 [project.scripts]
