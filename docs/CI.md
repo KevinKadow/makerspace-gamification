@@ -1,0 +1,16 @@
+# CI test jobs
+
+The Ledger tests workflow runs two independent jobs:
+
+- `test` runs on `ubuntu-24.04`: prompt validators, wheel/Compose checks, and `python -m pytest -m "not mongo_integration" --strict-markers`.
+- `mongo-integration` runs on `ubuntu-22.04`: starts a disposable replica set and runs `python -m pytest -m mongo_integration --strict-markers` with `LEDGER_TEST_MONGO_URI`.
+
+New tests that need a real MongoDB server must carry `@pytest.mark.mongo_integration`. Keep their missing-URI skip for local full-suite runs. CI supplies the URI explicitly. The jobs have no dependency on each other, so a Mongo startup failure cannot prevent ordinary tests from running. Repository branch protection should require both jobs; workflow changes do not update branch protection automatically.
+
+The Mongo job pins the official `mongo:8.0.34-noble` image to manifest digest `sha256:c2d54fddfb3738fb27fe117f51692e3f44e640a3e7aeb8da3937ee9cd33a650b`. Its tag/digest and Linux AMD64 manifest were verified against Docker Registry when pinned. This is registry verification, not proof of a successful runtime on the GitHub host. Image updates should verify the replacement tag/digest and pass the integration job before merging.
+
+The Ubuntu 22.04 runner is a temporary kernel compatibility workaround. As of 2026-10-29, GitHub's published [Ubuntu 24.04 image](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md) uses `7.0.0-1017-azure`, which the pinned Mongo release rejects at startup; the [Ubuntu 22.04 image](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2204-Readme.md) uses `6.8.0-1070-azure`. Docker containers share the host kernel, so changing only the container's Ubuntu tag cannot fix this. See MongoDB's [kernel incompatibility report](https://jira.mongodb.org/browse/SERVER-121912) and [Ubuntu kernel detection fix](https://jira.mongodb.org/browse/SERVER-131779). Keep Mongo's startup safety checks enabled. Before returning this job to Ubuntu 24.04, verify a compatible Mongo image against the actual Docker host kernel and pass the real replica-set tests. Runner labels receive image updates and do not permanently pin a kernel; revisit this workaround before [Ubuntu 22.04 runner retirement](https://github.com/actions/runner-images/issues/14254).
+
+`scripts/ci/start-mongo.sh` requires `MONGO_TEST_IMAGE`, logs the Docker host's operating system, kernel and architecture before launch, checks the container remains running during readiness polling, and requires successful ping, replica-set initialization and writable-primary election. Failure prints Docker state (including exit code and OOM status) and the last 200 timestamped log lines. The workflow also captures diagnostics on failure before always removing the container and its anonymous volumes. No external database credentials are needed; the host port binds only to loopback.
+
+To reproduce on a Docker-equipped Linux host, set `MONGO_TEST_IMAGE` to the exact workflow value, run `bash scripts/ci/start-mongo.sh`, and run the marked tests with `LEDGER_TEST_MONGO_URI=mongodb://localhost:27017/?replicaSet=rs0`. Remove the CI-only server afterward with `docker rm -fv ledger-mongo`. Never point these tests at production: they create and drop disposable test databases.

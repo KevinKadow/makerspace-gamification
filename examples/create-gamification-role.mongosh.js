@@ -1,0 +1,26 @@
+// SELF-MANAGED MONGODB ONLY: Atlas rejects db.createRole().
+// For Atlas use mongodb-roles.js's Atlas JSON and docs/MONGODB_ACCESS.md.
+// Run from the repository root as a role-provisioning administrator, not the bot.
+load("examples/mongodb-roles.js");
+
+const makerspaceDatabase = "makerauth";
+const ledgerDatabase = "makerauth";
+const roles = LedgerMongoRoles.buildRoles(makerspaceDatabase, ledgerDatabase);
+
+// The admin database allows role resources in different databases if configured.
+db = db.getSiblingDB("admin");
+
+// For separate credentials, assign these roles to two different database users:
+db.createRole(roles.source); // MLAB_URI user: source reads only.
+db.createRole(roles.ledger); // LEDGER_URI user: named Ledger collections only.
+// Optional; uncomment and assign to MLAB_URI only when Rails event-note persistence is enabled.
+// db.createRole(roles.ticket_note_writer);
+
+// Optional alternative when one gamification user must hold both sets of rights:
+// db.createRole(roles.gamification); // Includes the optional ticket-note grants.
+// A role is not a user; assign it when provisioning the corresponding DB user.
+// No user/role administration permissions are granted to the application roles.
+// Optional anomaly role is generated from the exact rebuilt schema manifest:
+// const schema = JSON.parse(cat("build/anomaly/manifest.json"));
+// db.createRole(LedgerMongoRoles.buildAnomalyRole(schema, makerspaceDatabase));
+// Review and apply its replacement privileges when new source collections appear.

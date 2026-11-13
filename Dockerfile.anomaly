@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1
+FROM ruby:3.4.4-slim AS schema
+ARG ANOMALY_ACTIVESUPPORT_VERSION=8.0.5.1
+RUN gem install activesupport --version "$ANOMALY_ACTIVESUPPORT_VERSION" --no-document
+WORKDIR /schema
+COPY scripts/anomaly/extract_schema.rb /schema/extract_schema.rb
+# Populated on EVERY analytics rebuild by scripts/anomaly/refresh-rails.sh.
+# This copy intentionally fails on an unprepared direct Docker build.
+COPY build/anomaly/rails /rails
+RUN ruby /schema/extract_schema.rb --root /rails \
+    --commit "$(cat /rails/rails.commit)" --repository "$(cat /rails/rails.repository)" \
+    --ref "$(cat /rails/rails.ref)" --output /schema/manifest.json
+
+FROM python:3.12-slim
+WORKDIR /app
+COPY pyproject.toml THIRD_PARTY_NOTICES.md ./
+COPY ledger ./ledger
+RUN pip install --no-cache-dir '.[anomaly]' \
+    && useradd --uid 10001 --create-home ledger
+COPY --from=schema /schema/manifest.json /app/schema/manifest.json
+ENV ANOMALY_SCHEMA_PATH=/app/schema/manifest.json
+USER ledger
+CMD ["python", "-m", "ledger.anomaly", "run"]

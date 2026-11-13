@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "makerspace-ledger"
+version = "0.1.0"
+description = "Opt-in makerspace skill progression and community recognition"
+requires-python = ">=3.12"
+license-files = ["THIRD_PARTY_NOTICES.md"]
+dependencies = ["pymongo>=4.10,<5", "slack-bolt>=1.23,<2", "websocket-client>=1.8,<2", "paho-mqtt>=2.1,<3", "requests>=2.32,<3", "Pillow>=11,<13", "tzdata>=2025.2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "PyYAML>=6,<7"]
+server = ["gunicorn>=23,<24; sys_platform != 'win32'"]
+knowledge = ["langchain-chroma==0.2.4", "chromadb==1.0.20", "langchain-core>=0.3.72,<1", "langchain-text-splitters>=0.3,<0.4", "tiktoken>=0.8,<1"]
+anomaly = ["psycopg[binary]>=3.2,<4", "numpy>=1.26,<3", "scikit-learn>=1.5,<2", "python-dateutil>=2.9,<3"]
+
+[project.scripts]
+ledger = "ledger.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ledger*"]
+
+[tool.setuptools.package-data]
+ledger = ["assets/*.png", "assets/*.json", "prompts/*.json", "prompts/*.xml.md", "sponsorship_reminder_variants.json"]
+"ledger.anomaly" = ["security_rules.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q -p no:cacheprovider"
+markers = ["mongo_integration: requires an explicitly configured disposable MongoDB replica set"]
