@@ -164,12 +164,11 @@ def appearance_request(ledger, requester, text):
 
 def converse(ledger, composer, member, request, history=(), private=True, selection=None, *, use_tools=True, ambient=False, ambient_knowledge=False):
     ledger.require_member(member)
-    if knowledge_enabled():
-        from .slack_knowledge_import import sensitive_text
-        if sensitive_text(request):
-            return {"text": "" if ambient else "I can't process that question because it may contain sensitive information.",
-                    "outcome": "fallback", "tool_calls": 0, "latency": 0}
-        history = [item for item in history if not sensitive_text(str(item.get("content", "")))]
+    from .slack_knowledge_import import sensitive_text
+    if sensitive_text(request):
+        return {"text": "" if ambient else "I can't process that question because it may contain sensitive information.",
+                "outcome": "fallback", "tool_calls": 0, "latency": 0}
+    history = [item for item in history if not sensitive_text(str(item.get("content", "")))]
     context = QueryTools(ledger, member, private)
     outgoing_sponsorship_request = sponsorship_request(request) or sponsorship_followup(request, history)
     requires_sponsorship_report = private and ledger.active(member) and outgoing_sponsorship_request
@@ -262,7 +261,7 @@ def converse(ledger, composer, member, request, history=(), private=True, select
                             "sponsorship_report": context.sponsorship_report, "latency": time.monotonic() - started}
                 result = {"text": member_text(content), "outcome": "generated", "tool_calls": context.calls, "latency": time.monotonic() - started}
                 if context.knowledge_sources:
-                    result["knowledge_sources"] = context.knowledge_sources[:3]
+                    result["knowledge_sources"] = context.knowledge_sources.copy()
                 return result
             calls = response["tool_calls"]
             if context.calls + len(calls) > 3:

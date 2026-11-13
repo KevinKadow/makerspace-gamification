@@ -1,10 +1,11 @@
 """Exercise production claim construction, not just the in-memory queue."""
+from datetime import timedelta
 from unittest.mock import MagicMock
 
 import pytest
 
 from ledger.anomaly.slack import ANOMALY_KINDS
-from ledger.cli import outbox_filters
+from ledger.cli import home_should_yield, outbox_filters
 from ledger.storage import MongoStore, MemoryStore, now
 from ledger.worker import Worker
 
@@ -41,3 +42,25 @@ def test_worker_uses_production_lane_and_anomaly_exclusions(lane):
     if lane != "avatars":
         assert "avatar_generate" not in query["$in"]
         assert "avatar_reference" not in query["$in"]
+
+
+@pytest.mark.parametrize("kind", ["avatar_generate", "avatar_reference", "anomaly_query", "home_publish", "conversation"])
+def test_home_does_not_yield_to_work_outside_its_sibling_delivery_lane(kind):
+    store = MemoryStore()
+    store.put("ledger_outbox", {"_id": "job", "kind": kind,
+                               "status": "pending", "available_at": now()})
+    assert not home_should_yield(store)
+
+
+def test_home_yields_only_to_ready_pending_sibling_delivery():
+    store = MemoryStore()
+    job = {"_id": "job", "kind": "message", "status": "pending",
+           "available_at": now() + timedelta(minutes=1)}
+    store.put("ledger_outbox", job)
+    assert not home_should_yield(store)
+    job["available_at"] = now() - timedelta(seconds=1)
+    store.put("ledger_outbox", job)
+    assert home_should_yield(store)
+    job["status"] = "done"
+    store.put("ledger_outbox", job)
+    assert not home_should_yield(store)

@@ -247,15 +247,37 @@ class QwenDistiller:
     def __call__(self, messages):
         self._budget.checks = 0
         calls = 0
-        lines = []
-        for row in messages:
-            def render(text):
-                return json.dumps({"at": row["ts"], "participant": row["display_name"], "message": text}, ensure_ascii=False)
-            remaining = row["text"]
-            while remaining:
-                if self._fits([render(remaining)]):
-                    lines.append(render(remaining))
+        lines = [json.dumps({"at": row["ts"], "participant": row["display_name"],
+                             "message": row["text"]}, ensure_ascii=False)
+                 for row in messages if row["text"]]
+        for level in range(8):
+            groups = []
+            start = 0
+            while start < len(lines):
+                # Test a whole batch, then find a fitting prefix. This bounds
+                # tokenizer calls by batches instead of by message count.
+                if self._fits(lines[start:]):
+                    groups.append(lines[start:])
                     break
+                low, high = start, len(lines)
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if self._fits(lines[start:middle]):
+                        low = middle
+                    else:
+                        high = middle - 1
+                if low > start:
+                    groups.append(lines[start:low])
+                    start = low
+                    continue
+                if level or len(lines) >= 1024:
+                    raise ValueError("A source message exceeds the extraction context limit")
+                # An individual source message is too large. Split it without
+                # losing characters, then retry packing the resulting pieces.
+                row = json.loads(lines[start])
+                remaining = row["message"]
+                def render(text):
+                    return json.dumps({**row, "message": text}, ensure_ascii=False)
                 low, high = 0, len(remaining)
                 while low < high:
                     middle = (low + high + 1) // 2
@@ -263,24 +285,11 @@ class QwenDistiller:
                         low = middle
                     else:
                         high = middle - 1
-                if low < 1 or len(lines) >= 1024:
+                if low < 1:
                     raise ValueError("A source message exceeds the extraction context limit")
-                # Prefer a word boundary, but preserve every character.
                 split = remaining.rfind(" ", 0, low)
                 split = split + 1 if split > low // 2 else low
-                lines.append(render(remaining[:split]))
-                remaining = remaining[split:]
-        for _ in range(8):
-            groups, current = [], []
-            for line in lines:
-                if not self._fits([line]):
-                    raise ValueError("A source message exceeds the extraction context limit")
-                if current and not self._fits(current + [line]):
-                    groups.append(current)
-                    current = []
-                current.append(line)
-            if current:
-                groups.append(current)
+                lines[start:start + 1] = [render(remaining[:split]), render(remaining[split:])]
             if not groups:
                 raise ValueError("Empty thread")
             calls += len(groups)

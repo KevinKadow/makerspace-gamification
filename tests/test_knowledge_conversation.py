@@ -83,14 +83,34 @@ def test_knowledge_search_fails_closed_for_unavailable_invalid_or_missing_result
     assert "secret" not in str(result)
 
 
-def test_sensitive_query_is_not_sent_to_model_or_embeddings(joined, monkeypatch):
-    enable(monkeypatch)
+@pytest.mark.parametrize("knowledge", [False, True])
+def test_sensitive_query_is_not_sent_to_model_or_embeddings(joined, monkeypatch, knowledge):
+    if knowledge:
+        enable(monkeypatch)
+    else:
+        monkeypatch.delenv("LEDGER_KNOWLEDGE_ENABLED", raising=False)
     ledger, _, _, composer, api, _ = joined
     with patch("ledger.knowledge_index.KnowledgeIndex.from_env") as factory:
         result = converse(ledger, composer, member(), "The access code is 1234, what is it?")
     assert result["outcome"] == "fallback"
     factory.assert_not_called()
     api.tool_response.assert_not_called()
+
+
+@pytest.mark.parametrize("knowledge", [False, True])
+def test_sensitive_history_is_removed_before_inference(joined, monkeypatch, knowledge):
+    if knowledge:
+        enable(monkeypatch)
+    else:
+        monkeypatch.delenv("LEDGER_KNOWLEDGE_ENABLED", raising=False)
+    ledger, _, _, composer, api, _ = joined
+    api.tool_response.return_value = {"role": "assistant", "content": "Hello."}
+    history = [{"role": "user", "content": "The access code is 1234"},
+               {"role": "assistant", "content": "Welcome back."}]
+    assert converse(ledger, composer, member(), "Hello", history=history)["outcome"] == "generated"
+    messages = api.tool_response.call_args.args[0]
+    assert history[0] not in messages
+    assert history[1] in messages
 
 
 def test_model_cannot_fabricate_links_or_invoke_an_unexposed_knowledge_tool(joined, monkeypatch):
@@ -128,11 +148,17 @@ def test_ambient_notice_gates_new_channel_and_rechecks_consent_and_sources(joine
     job = claim(store, "reply:COTHER:101.001")
     api.tool_response.return_value = {"role": "assistant", "content": "The team cleaned the vent."}
     index = indexed()
+    index.retrieve.return_value = [dict(source(), thread_id=f"thread-{i}", generation=f"gen-{i}",
+                                        url=f"https://app.slack.com/archives/COTHER/p10000100{i}")
+                                   for i in range(4)]
     with patch("ledger.knowledge_index.KnowledgeIndex.from_env", return_value=index):
         worker.outbox(job)
     assert "Slack thread" in slack.chat_postMessage.call_args.kwargs["text"]
-    # A saved reply cannot be delivered after its supporting source is replaced.
-    index.valid_evidence.return_value = False
+    sources = index.valid_evidence.call_args.args[0]
+    assert [item["generation"] for item in sources] == [f"gen-{i}" for i in range(4)]
+    assert slack.chat_postMessage.call_args.kwargs["text"].count("Slack thread") == 3
+    # Even an uncited fourth source may have influenced the saved reply.
+    index.valid_evidence.side_effect = lambda sources: all(item["generation"] != "gen-3" for item in sources)
     with patch("ledger.knowledge_index.KnowledgeIndex.from_env", return_value=index), pytest.raises(Denied):
         worker.outbox(job)
     profile = ledger.preference_profile(member())

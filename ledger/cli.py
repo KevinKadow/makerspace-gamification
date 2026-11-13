@@ -53,6 +53,14 @@ def outbox_filters(queue):
     return {"exclude": CHANNEL_KINDS + RESULT_KINDS + INTERACTIVE_KINDS + HOME_KINDS + AVATAR_KINDS + ANOMALY_KINDS}
 
 
+def home_should_yield(store):
+    """Yield only to the delivery lane guaranteed to run alongside Home."""
+    return store.exists("ledger_outbox", {
+        "kind": {"$nin": outbox_filters("outbox")["exclude"]},
+        "status": "pending", "available_at": {"$lte": now()},
+    })
+
+
 def database_ledger():
     # Legacy MONGO_URI is a compatibility fallback only. Never use one new
     # credential for the other connection when its counterpart is missing.
@@ -272,8 +280,7 @@ def main():
                         ledger.store.atomic(lambda s: enqueue(s, "ledger_inbox",
                             f"home-reconcile:daily:{int(time.time() // 86400)}", "home_reconcile", {"source": "daily"}))
                         last_home_scan = time.monotonic()
-                    if queue == "homes" and ledger.store.exists("ledger_outbox", {
-                            "kind": {"$nin": HOME_KINDS}, "status": "pending", "available_at": {"$lte": now()}}):
+                    if queue == "homes" and home_should_yield(ledger.store):
                         stop.wait(0.25)
                         continue
                     worked = worker.step("ledger_inbox", exclude=["engagement"]) if queue == "inbox" else worker.step("ledger_inbox", kinds=["engagement"]) if queue == "engagement" else worker.step(

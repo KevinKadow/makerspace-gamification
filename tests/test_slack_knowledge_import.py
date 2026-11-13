@@ -193,3 +193,30 @@ def test_distiller_checks_rendered_tokens_and_disables_thinking_via_adapter():
     with pytest.raises(ValueError, match="context limit"):
         QwenDistiller(API(), context_limit=10, output_tokens=2000)(
             [{"ts": "10.000001", "display_name": "Ada", "text": "x"}])
+
+
+def test_distiller_batches_many_short_messages_within_token_budget():
+    class API:
+        def __init__(self):
+            self.checks = 0
+            self.requests = []
+
+        def tokenize(self, messages):
+            self.checks += 1
+            return len(messages[-1]["content"])
+
+        def _request(self, messages, temperature, max_tokens, **kwargs):
+            self.requests.append(messages[-1]["content"])
+            return json.dumps(summary([{"text": "Question"}]))
+
+    rows = [{"ts": str(i), "display_name": "Ada", "text": f"Question {i}"}
+            for i in range(200)]
+    api = API()
+    result = QwenDistiller(api, context_limit=5000, output_tokens=100)(rows)
+    assert result["status"] == "OK"
+    # Several extraction batches are needed, followed by one combination.
+    assert len(api.requests) > 2
+    assert api.checks < 128
+    extracted = "\n".join(api.requests[:-1])
+    for row in rows:
+        assert f'"message": "{row["text"]}"' in extracted
